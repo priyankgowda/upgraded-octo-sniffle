@@ -9,6 +9,7 @@ import os
 load_dotenv()
 
 access_token = os.getenv("ACCESS_TOKEN")
+phone_number_id = os.getenv("PHONE_NUMBER_ID")
 
 REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount"}
 
@@ -29,8 +30,6 @@ def send_whatsapp_msg(
     amount: str,
     pdf_bytes: bytes
 ) -> bool:
-    
-    phone_number_id = "905890485940579"
     
     # Step 1: Upload the PDF to WhatsApp to get a media ID
     upload_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/media"

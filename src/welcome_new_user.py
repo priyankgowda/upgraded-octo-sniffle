@@ -9,14 +9,13 @@ import os
 load_dotenv()
 
 access_token = os.getenv("ACCESS_TOKEN")
+phone_number_id = os.getenv("PHONE_NUMBER_ID")
 
 REQUIRED_COLUMNS = {"phone number"}
 
 
 def send_whatsapp_msg(phone: str) -> bool:
     """Send welcome WhatsApp message using the welcome_new_user template."""
-    
-    phone_number_id = "905890485940579"
     
     message_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
     message_headers = {
