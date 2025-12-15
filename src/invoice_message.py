@@ -46,7 +46,6 @@ def send_whatsapp_msg(
         "file": (f"{invoice_no}.pdf", pdf_bytes, "application/pdf")
     }
     
-    st.info(f"Uploading PDF for invoice {invoice_no}...")
     upload_resp = requests.post(upload_url, headers=upload_headers, data=upload_data, files=upload_files)
     
     if upload_resp.status_code != 200:
@@ -109,7 +108,6 @@ def send_whatsapp_msg(
         }
     }
     
-    st.info(f"Sending WhatsApp message to {phone} for invoice {invoice_no}...")
     resp = requests.post(message_url, headers=message_headers, json=payload)
 
     if resp.status_code != 200:

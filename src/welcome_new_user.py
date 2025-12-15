@@ -33,7 +33,6 @@ def send_whatsapp_msg(phone: str) -> bool:
         }
     }
     
-    st.info(f"Sending welcome WhatsApp message to {phone}...")
     resp = requests.post(message_url, headers=message_headers, json=payload)
 
     if resp.status_code != 200:
