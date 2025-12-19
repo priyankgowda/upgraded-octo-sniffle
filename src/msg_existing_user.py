@@ -9,10 +9,10 @@ load_dotenv()
 access_token = os.getenv("ACCESS_TOKEN")
 phone_number_id = os.getenv("PHONE_NUMBER_ID")
 
-REQUIRED_COLUMNS = {"phone number", 'dealer code', 'dealer name'}
+REQUIRED_COLUMNS = {"phone number", 'dealer name', 'dealer code'}
 
 
-def send_whatsapp_msg(phone: str, user_name: str, dealer_code: str) -> bool:
+def send_whatsapp_msg(phone: str, dealer_name: str, dealer_code: str) -> bool:
     """Send welcome WhatsApp message using the welcome_new_user template."""
     
     message_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
@@ -26,7 +26,7 @@ def send_whatsapp_msg(phone: str, user_name: str, dealer_code: str) -> bool:
         "to": f"91{phone}",
         "type": "template",
         "template": {
-            "name": "kingdao_welcome_message",
+            "name": "welcome_existing_user",
             "language": {"code": "en"},
             "components": [
                 {
@@ -34,8 +34,8 @@ def send_whatsapp_msg(phone: str, user_name: str, dealer_code: str) -> bool:
                     "parameters": [
                         {
                             "type": "text",
-                            "parameter_name": "user_name",
-                            "text": user_name
+                            "parameter_name": "dealer_name",
+                            "text": dealer_name
                         },
                         {
                             "type": "text",
@@ -80,30 +80,30 @@ def validate_data(df: pd.DataFrame) -> list[str] | None:
 
     # Trim whitespace
     df["phone number"] = df["phone number"].astype(str).str.strip()
-    df["user name"] = df["dealer name"].astype(str).str.strip()
+    df["dealer name"] = df["dealer name"].astype(str).str.strip()
     df["dealer code"] = df["dealer code"].astype(str).str.strip()
 
     # Check for empty cells
-    empty_mask = df["phone number"].eq("") | df["user name"].eq("") | df["dealer code"].eq("")
+    empty_mask = df["phone number"].eq("") | df["dealer name"].eq("") | df["dealer code"].eq("")
     if empty_mask.any():
         st.warning(f"Rows with missing phone numbers: {list(df.index[empty_mask])}")
         st.info("Fill all phone numbers and re-upload.")
         return None
 
-    # Return unique phone numbers
+    # Return unique phone numbers, dealer names and codes
     phone_numbers = df["phone number"].tolist()
-    user_names = df["user name"].tolist()
+    dealer_names = df["dealer name"].tolist()
     dealer_codes = df["dealer code"].tolist()
-    return phone_numbers, user_names, dealer_codes
+    return phone_numbers, dealer_names, dealer_codes
 
 
-def process_and_send(phone_numbers: list[str], user_names: list[str], dealer_codes: list[str]) -> list[dict]:
+def process_and_send(phone_numbers: list[str], dealer_names: list[str], dealer_codes: list[str]) -> list[dict]:
     """Send welcome messages for each phone number, return results list."""
     results = []
     
-    for phone, user_name, dealer_code in zip(phone_numbers, user_names, dealer_codes):
+    for phone, dealer_name, dealer_code in zip(phone_numbers, dealer_names, dealer_codes):
         try:
-            ok = send_whatsapp_msg(phone, user_name, dealer_code)
+            ok = send_whatsapp_msg(phone, dealer_name, dealer_code)
             status = "sent" if ok else "failed"
         except Exception as e:
             status = f"error: {e}"
@@ -118,7 +118,7 @@ def process_and_send(phone_numbers: list[str], user_names: list[str], dealer_cod
 # -----------------------------------------------------------------------------
 def main():
     st.header("Welcome New User Message Sender")
-    st.write(
+    st.markdown(
         "Upload an **Excel file** with column: `phone number`, `dealer name`, `dealer code`.\n\n"
         "The system will send a welcome message to all new users."
     )
@@ -138,12 +138,12 @@ def main():
         if data is None:
             return
         
-        phone_numbers, user_names, dealer_codes = data
+        phone_numbers, dealer_names, dealer_codes = data
 
         st.info(f"Found {len(phone_numbers)} phone number(s) to process.")
 
         with st.spinner("Sending welcome messages..."):
-            results = process_and_send(phone_numbers, user_names, dealer_codes)
+            results = process_and_send(phone_numbers, dealer_names, dealer_codes)
 
         st.success(f"Processed {len(results)} phone number(s).")
         st.dataframe(pd.DataFrame(results))

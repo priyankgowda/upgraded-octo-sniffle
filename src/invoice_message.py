@@ -11,7 +11,7 @@ load_dotenv()
 access_token = os.getenv("ACCESS_TOKEN")
 phone_number_id = os.getenv("PHONE_NUMBER_ID")
 
-REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount"}
+REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount", "no of cases"}
 
 
 def extract_invoice_number(filename: str) -> str | None:
@@ -25,9 +25,10 @@ def extract_invoice_number(filename: str) -> str | None:
 #real function to send whatsapp message with pdf attachment
 def send_whatsapp_msg(
     phone: str,
-    customer_name: str,
+    dealer_name: str,
     invoice_no: str,
     amount: str,
+    no_of_cases: str,
     pdf_bytes: bytes
 ) -> bool:
     
@@ -69,8 +70,8 @@ def send_whatsapp_msg(
         "to": f"91{phone}",
         "type": "template",
         "template": {
-            "name": "invoice_message",
-            "language": {"code": "en_IN"},
+            "name": "invoice_details_with_pdf",
+            "language": {"code": "en"},
             "components": [
                 {
                     "type": "header",
@@ -89,13 +90,13 @@ def send_whatsapp_msg(
                     "parameters": [
                         {
                             "type": "text",
-                            "parameter_name": "customer_name",
-                            "text": customer_name
+                            "parameter_name": "dealer_name",
+                            "text": dealer_name
                         },
                         {
                             "type": "text",
-                            "parameter_name": "invoice_number",
-                            "text": invoice_no
+                            "parameter_name": "no_of_cases",
+                            "text": str(no_of_cases)
                         },
                         {
                             "type": "text",
@@ -164,7 +165,8 @@ def validate_data(df: pd.DataFrame, filenames: list[str]) -> dict[str, dict] | N
         row["invoice number"]: {
             "phone": row["phone number"],
             "dealer": row["dealer name"],
-            "amount": row["amount"]
+            "amount": row["amount"],
+            "no_of_cases": row["no of cases"]
         }
         for _, row in df.iterrows()
     }
@@ -186,11 +188,12 @@ def process_and_send(mapping: dict[str, dict], invoice_files: list) -> list[dict
         phone = info["phone"]
         dealer = info["dealer"]
         amount = info["amount"]
+        no_of_cases = info["no_of_cases"]
 
         # Send WhatsApp message with PDF bytes directly
         try:
             pdf_bytes = file_obj.read()
-            ok = send_whatsapp_msg(phone, dealer, inv, str(amount), pdf_bytes)
+            ok = send_whatsapp_msg(phone, dealer, inv, str(amount), str(no_of_cases), pdf_bytes)
             status = "sent" if ok else "failed"
         except Exception as e:
             status = f"error: {e}"
@@ -205,7 +208,7 @@ def process_and_send(mapping: dict[str, dict], invoice_files: list) -> list[dict
 def main():
     st.header("Invoice Message Sender")
     st.write(
-        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`.\n\n"
+        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`, `no of cases`.\n\n"
         "Upload **invoice files** (multi-select). Filename format: `<invoice_number>_<anything>.<ext>`"
     )
 

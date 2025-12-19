@@ -15,12 +15,17 @@ page = st.navigation(
             st.Page(
                 page= dir_path / "src" / "invoice_message.py",
                 title="Invoice message",
-                icon=":material/table:",
+                icon=":material/receipt_long:",
             ),
             st.Page(
                 page= dir_path / "src" / "welcome_new_user.py",
                 title="New User",
-                icon=":material/show_chart:",
+                icon=":material/person_add:",
+            ),
+            st.Page(
+                page= dir_path / "src" / "msg_existing_user.py",
+                title="Welcome Existing User",
+                icon=":material/person:",
             )
         ]
     },
