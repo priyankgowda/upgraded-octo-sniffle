@@ -6,52 +6,41 @@ import os
 
 load_dotenv()
 
-access_token = os.getenv("ACCESS_TOKEN")
-phone_number_id = os.getenv("PHONE_NUMBER_ID")
+auth_key = os.getenv("AUTHKEY")
+template_id = os.getenv("EXISTING_USER_WID")
 
 REQUIRED_COLUMNS = {"phone number", 'dealer name', 'dealer code'}
 
 
-def send_whatsapp_msg(phone: str, dealer_name: str, dealer_code: str) -> bool:
+def send_whatsapp_msg(data: list[dict]) -> bool:
     """Send welcome WhatsApp message using the welcome_new_user template."""
     
-    message_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
+    message_url = f"https://console.authkey.io/restapi/requestjson_v2.0.php"
     message_headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {access_token}"
+        "Authorization": f"Basic {auth_key}"
     }
-    
+
     payload = {
-        "messaging_product": "whatsapp",
-        "to": f"91{phone}",
-        "type": "template",
-        "template": {
-            "name": "welcome_existing_user",
-            "language": {"code": "en"},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "parameter_name": "dealer_name",
-                            "text": dealer_name
-                        },
-                        {
-                            "type": "text",
-                            "parameter_name": "dealer_code",
-                            "text": dealer_code
-                        }
-                    ]
+        "version": "2.0",
+        "country_code": "91",
+        "wid": template_id,
+        "type": "text",
+        "data":
+        [
+            {
+                "mobile": item["phone_number"], 
+                "bodyValues": {
+                    "1": item["dealer_name"],
+                    "2": item["dealer_code"]
                 }
-            ]
-        }
+            } for item in data
+        ]
     }
-    
+
     resp = requests.post(message_url, headers=message_headers, json=payload)
 
     if resp.status_code != 200:
-        st.error(f"WhatsApp API error for {phone}: {resp.text}")
         return False
 
     return True
@@ -91,27 +80,7 @@ def validate_data(df: pd.DataFrame) -> list[str] | None:
         return None
 
     # Return unique phone numbers, dealer names and codes
-    phone_numbers = df["phone number"].tolist()
-    dealer_names = df["dealer name"].tolist()
-    dealer_codes = df["dealer code"].tolist()
-    return phone_numbers, dealer_names, dealer_codes
-
-
-def process_and_send(phone_numbers: list[str], dealer_names: list[str], dealer_codes: list[str]) -> list[dict]:
-    """Send welcome messages for each phone number, return results list."""
-    results = []
-    
-    for phone, dealer_name, dealer_code in zip(phone_numbers, dealer_names, dealer_codes):
-        try:
-            ok = send_whatsapp_msg(phone, dealer_name, dealer_code)
-            status = "sent" if ok else "failed"
-        except Exception as e:
-            status = f"error: {e}"
-
-        results.append({"phone": phone, "status": status})
-    
-    return results
-
+    return df.to_dict()
 
 # -----------------------------------------------------------------------------
 # UI
@@ -137,17 +106,16 @@ def main():
         data = validate_data(df)
         if data is None:
             return
-        
-        phone_numbers, dealer_names, dealer_codes = data
 
-        st.info(f"Found {len(phone_numbers)} phone number(s) to process.")
+        st.info(f"Found {len(data)} phone number(s) to process.")
 
         with st.spinner("Sending welcome messages..."):
-            results = process_and_send(phone_numbers, dealer_names, dealer_codes)
+            result = send_whatsapp_msg(data)
 
-        st.success(f"Processed {len(results)} phone number(s).")
-        st.dataframe(pd.DataFrame(results))
-
+        if result:
+            st.success(f"Processed {len(data)} phone number(s).")
+        else:
+            st.error(f"Unable to send messages. Please check if the numbers entered are correct!")
 
 if __name__ == "__main__":
     main()
