@@ -106,10 +106,10 @@ def validate_data(df: pd.DataFrame) -> list[dict] | None:
 
 # ------------------------------- UI ----------------------------------------------
 def main():
-    st.header("Welcome New User Message Sender")
+    st.header("Welcome Existing User Message Sender")
     st.markdown(
         "Upload an **Excel file** with column: `phone number`, `dealer name`, `dealer code`.\n\n"
-        "The system will send a welcome message to all new users."
+        "The system will send a welcome message to all existing users."
     )
 
     excel_file = st.file_uploader("Excel file with phone numbers", type=["xlsx", "xls"])
