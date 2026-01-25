@@ -5,117 +5,208 @@ import streamlit as st
 import requests
 from dotenv import load_dotenv
 import os
+from streamlit.runtime.uploaded_file_manager import UploadedFile
+import base64
 
 load_dotenv()
 
-access_token = os.getenv("ACCESS_TOKEN")
-phone_number_id = os.getenv("PHONE_NUMBER_ID")
+auth_key = os.getenv("AUTHKEY")
+template_wid = os.getenv("INVOICE_MSG_WID")
+REPO = os.getenv("REPO")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount", "no of cases"}
+REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount", "no of cases", "sales number"}
+AUTHKEY_API_URL = "https://console.authkey.io/restapi/requestjson_v2.0.php"
+BATCH_SIZE = 200
 
 
 def extract_invoice_number(filename: str) -> str | None:
     """Return the part of the filename before the first underscore."""
+    filename= filename.split(".")[0]
     if not filename:
         return None
     token = filename.split("_")[0]
     return token.strip() or None
 
 
-#real function to send whatsapp message with pdf attachment
-def send_whatsapp_msg(
-    phone: str,
-    dealer_name: str,
-    invoice_no: str,
-    amount: str,
-    no_of_cases: str,
-    pdf_bytes: bytes
-) -> bool:
+def get_files_url(invoice_files: list[UploadedFile]) -> dict[str, str]:
+    inv_to_link = {}
     
-    # Step 1: Upload the PDF to WhatsApp to get a media ID
-    upload_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/media"
-    upload_headers = {
-        "Authorization": f"Bearer {access_token}"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json"
     }
+    
+    for file in invoice_files:
+        try:
+            inv_no = extract_invoice_number(file.name)
+            if not inv_no:
+                continue  # Skip files with invalid names
 
-    upload_data = {
-        "messaging_product": "whatsapp",
-        "type": "document"
-    }
+            # Reset file pointer in case it was read before
+            file.seek(0)
+            
+            # Upload file to github
+            url = f"https://api.github.com/repos/{REPO}/contents/uploads/{inv_no}.pdf"
+            content = base64.b64encode(file.read()).decode()
+            
+            # Check if file already exists (need sha to update)
+            existing_resp = requests.get(url, headers=headers)
+            sha = None
+            if existing_resp.status_code == 200:
+                sha = existing_resp.json().get("sha")
+            
+            data = {
+                "message": f"Upload {inv_no}",
+                "content": content,
+                "branch": "main"
+            }
+            
+            # Include sha if file already exists (required for update)
+            if sha:
+                data["sha"] = sha
 
-    upload_files = {
-        "file": (f"{invoice_no}.pdf", pdf_bytes, "application/pdf")
-    }
+            resp = requests.put(url, json=data, headers=headers)
+            resp_json = resp.json() if resp.text else {}
+
+            if resp.status_code in [200, 201]:
+                link = f"https://cdn.jsdelivr.net/gh/{REPO}@main/uploads/{inv_no}.pdf"
+                inv_to_link[inv_no] = link
+
+            # If upload fails for this file, continue with others (will be caught in process_and_send)
+
+        except Exception:
+            pass  # Silently skip, will be caught in process_and_send
     
-    upload_resp = requests.post(upload_url, headers=upload_headers, data=upload_data, files=upload_files)
-    
-    if upload_resp.status_code != 200:
-        st.error(f"Failed to upload PDF: {upload_resp.text}")
-        return False
-    
-    media_id = upload_resp.json().get("id")
-    if not media_id:
-        st.error(f"No media ID returned: {upload_resp.text}")
-        return False
-    
-    # Step 2: Send the WhatsApp message with the media ID
-    message_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
+    return inv_to_link
+
+
+def send_whatsapp_batch(messages: list[dict]) -> bool:
+    """
+    Send WhatsApp messages in batch using AuthKey API.
+    messages: list of dicts with keys: mobile, pdf_link, dealer_name, no_of_cases, amount
+    """
+    if not messages:
+        return True
+
     message_headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {access_token}"
+        "Authorization": f"Basic {auth_key}"
     }
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": f"91{phone}",
-        "type": "template",
-        "template": {
-            "name": "invoice_details_with_pdf",
-            "language": {"code": "en"},
-            "components": [
-                {
-                    "type": "header",
-                    "parameters": [
-                        {
-                            "type": "document",
-                            "document": {
-                                "id": media_id,
-                                "filename": f"{invoice_no}.pdf"
-                            }
-                        }
-                    ]
-                },
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "parameter_name": "dealer_name",
-                            "text": dealer_name
-                        },
-                        {
-                            "type": "text",
-                            "parameter_name": "no_of_cases",
-                            "text": str(no_of_cases)
-                        },
-                        {
-                            "type": "text",
-                            "parameter_name": "amount",
-                            "text": str(amount)
-                        }
-                    ]
-                }
-            ]
-        }
-    }
-    
-    resp = requests.post(message_url, headers=message_headers, json=payload)
 
-    if resp.status_code != 200:
-        st.error(f"WhatsApp API error for {phone}: {resp.text}")
+    data = []
+    for msg in messages:
+        data.append({
+            "headerValues": {
+                "headerData": msg["pdf_link"],
+                "headerFileName": f"{msg['invoice_no']}.pdf",
+            },
+            "mobile": msg["mobile"],
+            "bodyValues": {
+                "1": msg["dealer_name"],
+                "2": str(msg["no_of_cases"]),
+                "3": str(msg["amount"])
+            }
+        })
+
+    payload = {
+        "version": "2.0",
+        "country_code": "91",
+        "authkey": auth_key,
+        "wid": template_wid,
+        "type": "media",
+        "data": data
+    }
+
+    try:
+        resp = requests.post(AUTHKEY_API_URL, json=payload,headers=message_headers)
+        if resp.status_code == 200 and resp.json().get("status") == "Success":
+            return True
+        
+        return False
+    except Exception:
         return False
 
-    return True
+
+def process_and_send(mapping: dict, inv_to_link: dict) -> list[dict]:
+    """
+    Process invoice data and send WhatsApp messages to both phone and sales numbers.
+    Returns a list of result dicts for display.
+    """
+    results = []
+    messages = []
+
+    for invoice_no, info in mapping.items():
+        pdf_link = inv_to_link.get(invoice_no)
+        if not pdf_link:
+            results.append({
+                "Invoice Number": invoice_no,
+                "Dealer Name": info["dealer"],
+                "Phone Number": info["phone"],
+                "Sales Number": info["sales_number"],
+                "Status": "Failed",
+                "Reason": "Invoice file could not be uploaded. Please re-upload the file."
+            })
+            continue
+
+        # Add message for phone number
+        messages.append({
+            "mobile": info["phone"],
+            "pdf_link": pdf_link,
+            "dealer_name": info["dealer"],
+            "no_of_cases": info["no_of_cases"],
+            "amount": info["amount"],
+            "invoice_no": invoice_no
+        })
+
+        # Add message for sales number
+        messages.append({
+            "mobile": info["sales_number"],
+            "pdf_link": pdf_link,
+            "dealer_name": info["dealer"],
+            "no_of_cases": info["no_of_cases"],
+            "amount": info["amount"],
+            "invoice_no": invoice_no
+        })
+
+        results.append({
+            "Invoice Number": invoice_no,
+            "Dealer Name": info["dealer"],
+            "Phone Number": info["phone"],
+            "Sales Number": info["sales_number"],
+            "Status": "Queued",
+            "Reason": ""
+        })
+
+    # Send in batches (hidden from user)
+    failed_invoice_nos = set()
+    if messages:
+        progress_bar = st.progress(0, text="Sending messages...")
+        total_batches = (len(messages) + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        for i in range(0, len(messages), BATCH_SIZE):
+            batch = messages[i:i + BATCH_SIZE]
+            batch_num = (i // BATCH_SIZE) + 1
+            progress_bar.progress(batch_num / total_batches, text="Sending messages...")
+            success = send_whatsapp_batch(batch)
+            if not success:
+                # Track which invoice numbers were in this failed batch
+                for msg in batch:
+                    failed_invoice_nos.add(msg["invoice_no"])
+
+        progress_bar.empty()
+
+    # Update results based on batch outcomes
+    for r in results:
+        if r["Status"] == "Queued":
+            if r["Invoice Number"] in failed_invoice_nos:
+                r["Status"] = "Failed"
+                r["Reason"] = "Message could not be delivered. Please try again later."
+            else:
+                r["Status"] = "Sent"
+                r["Reason"] = ""
+
+    return results
 
 
 def load_excel(file) -> pd.DataFrame | None:
@@ -129,30 +220,45 @@ def load_excel(file) -> pd.DataFrame | None:
     return df
 
 
-def validate_data(df: pd.DataFrame, filenames: list[str]) -> dict[str, dict] | None:
+def validate_data(df: pd.DataFrame, invoice_numbers: list[str]) -> dict[str, dict] | None:
     """
     Validate Excel data and uploaded filenames.
-    Returns a mapping {invoice_number: {phone, dealer}} or None on failure.
+    Returns a mapping {invoice_number: {phone, dealer, amount, no_of_cases, sales_number}} or None on failure.
     """
-    # Check required columns
-    if not REQUIRED_COLUMNS.issubset(df.columns):
-        st.error(f"Excel must have columns: {', '.join(REQUIRED_COLUMNS)}")
+    if df.empty:
+        st.error("Excel file is empty.")
         return None
 
-    # Trim whitespace
+    # Check required columns
+    if not REQUIRED_COLUMNS.issubset(df.columns):
+        missing_cols = REQUIRED_COLUMNS - set(df.columns)
+        st.error(f"Excel is missing columns: {', '.join(missing_cols)}")
+        return None
+
+    # Trim whitespace and convert to string
     for col in REQUIRED_COLUMNS:
         df[col] = df[col].astype(str).str.strip()
 
-    # Check for empty cells
-    empty_mask = df[list(REQUIRED_COLUMNS)].eq("").any(axis=1)
+    # Check for empty cells (also catch 'nan' from NaN values)
+    empty_mask = df[list(REQUIRED_COLUMNS)].apply(
+        lambda col: col.eq("") | col.str.lower().eq("nan")
+    ).any(axis=1)
     if empty_mask.any():
-        st.warning(f"Rows with missing values: {list(df.index[empty_mask])}")
+        bad_rows = [i + 2 for i in df.index[empty_mask]]  # +2 for 1-based index + header row
+        st.warning(f"Rows with missing values (Excel row numbers): {bad_rows}")
         st.info("Fill all required fields and re-upload.")
         return None
 
-    # Build sets
+    # Check for duplicate invoice numbers in Excel
+    duplicates = df[df["invoice number"].duplicated(keep=False)]["invoice number"].unique()
+    if len(duplicates) > 0:
+        st.error(f"Duplicate invoice numbers in Excel: {', '.join(duplicates)}")
+        return None
+
+    # Build sets (ensure string comparison)
     excel_invoices = set(df["invoice number"])
-    file_invoices = {extract_invoice_number(f) for f in filenames} - {None}
+    file_invoices = set(str(inv) for inv in invoice_numbers)
+
 
     missing = excel_invoices - file_invoices
     if missing:
@@ -166,40 +272,12 @@ def validate_data(df: pd.DataFrame, filenames: list[str]) -> dict[str, dict] | N
             "phone": row["phone number"],
             "dealer": row["dealer name"],
             "amount": row["amount"],
-            "no_of_cases": row["no of cases"]
+            "no_of_cases": row["no of cases"],
+            "sales_number": row["sales number"]
         }
         for _, row in df.iterrows()
     }
     return mapping
-
-
-def process_and_send(mapping: dict[str, dict], invoice_files: list) -> list[dict]:
-    """Send messages for each uploaded invoice file, return results list."""
-    results = []
-    
-    for file_obj in invoice_files:
-        fname = file_obj.name
-        inv = extract_invoice_number(fname)
-        if not inv or inv not in mapping:
-            results.append({"file": fname, "invoice": inv, "status": "skipped"})
-            continue
-
-        info = mapping[inv]
-        phone = info["phone"]
-        dealer = info["dealer"]
-        amount = info["amount"]
-        no_of_cases = info["no_of_cases"]
-
-        # Send WhatsApp message with PDF bytes directly
-        try:
-            pdf_bytes = file_obj.read()
-            ok = send_whatsapp_msg(phone, dealer, inv, str(amount), str(no_of_cases), pdf_bytes)
-            status = "sent" if ok else "failed"
-        except Exception as e:
-            status = f"error: {e}"
-
-        results.append({"file": fname, "invoice": inv, "phone": phone, "dealer": dealer, "status": status})
-    return results
 
 
 # -----------------------------------------------------------------------------
@@ -208,7 +286,7 @@ def process_and_send(mapping: dict[str, dict], invoice_files: list) -> list[dict
 def main():
     st.header("Invoice Message Sender")
     st.write(
-        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`, `no of cases`.\n\n"
+        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`, `no of cases`, `sales number`.\n\n"
         "Upload **invoice files** (multi-select). Filename format: `<invoice_number>_<anything>.<ext>`"
     )
 
@@ -217,26 +295,48 @@ def main():
 
     if st.button("Send Messages"):
         if not excel_file:
-            st.error("Upload the Excel file first.")
+            st.error("Please upload the Excel file first.")
             return
         if not invoice_files:
-            st.error("Upload at least one invoice file.")
+            st.error("Please upload at least one invoice file.")
             return
 
         df = load_excel(excel_file)
         if df is None:
             return
 
-        filenames = [f.name for f in invoice_files]
-        mapping = validate_data(df, filenames)
+        # Extract invoice numbers from filenames for validation
+        file_invoice_numbers = [extract_invoice_number(f.name) for f in invoice_files]
+        file_invoice_numbers = [inv for inv in file_invoice_numbers if inv]  # Remove None values
+
+        if not file_invoice_numbers:
+            st.error("Could not extract invoice numbers from uploaded filenames. Expected format: `<invoice_number>_<anything>.<ext>` or `<invoice_number>.<ext>`")
+            return
+
+        # Validate data BEFORE uploading files
+        mapping = validate_data(df, file_invoice_numbers)
         if mapping is None:
             return
 
-        with st.spinner("Sending..."):
-            results = process_and_send(mapping, invoice_files)
+        # Upload files only after validation passes
+        with st.spinner("Uploading invoice files..."):
+            inv_to_link = get_files_url(invoice_files)
 
-        st.success(f"Processed {len(results)} file(s).")
-        st.dataframe(pd.DataFrame(results))
+        results = process_and_send(mapping, inv_to_link)
+
+        # Separate successful and failed
+        failed = [r for r in results if r["Status"] == "Failed"]
+        success_count = len(results) - len(failed)
+
+        if success_count > 0:
+            st.success(f"✅ Successfully sent messages for {success_count} invoice(s).")
+
+        if failed:
+            st.error(f"❌ Failed to send messages for {len(failed)} invoice(s). Please review and retry.")
+            failed_df = pd.DataFrame(failed)
+            # Remove Status column, keep only relevant info
+            failed_df = failed_df[["Invoice Number", "Dealer Name", "Phone Number", "Sales Number", "Reason"]]
+            st.dataframe(failed_df, width='stretch', hide_index=True)
 
 
 if __name__ == "__main__":

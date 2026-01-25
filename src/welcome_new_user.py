@@ -6,56 +6,42 @@ import os
 
 load_dotenv()
 
-access_token = os.getenv("ACCESS_TOKEN")
-phone_number_id = os.getenv("PHONE_NUMBER_ID")
+auth_key = os.getenv("AUTHKEY")
+template_id = os.getenv("NEW_USER_WID")
 
 REQUIRED_COLUMNS = {"phone number", 'dealer code', 'dealer name'}
 
-
-def send_whatsapp_msg(phone: str, user_name: str, dealer_code: str) -> bool:
-    """Send welcome WhatsApp message using the welcome_new_user template."""
-    
-    message_url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
+def send_whatsapp_msg(data: list[dict]) -> bool:
+    message_url = f"https://console.authkey.io/restapi/requestjson_v2.0.php"
     message_headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {access_token}"
+        "Authorization": f"Basic {auth_key}"
     }
-    
+
     payload = {
-        "messaging_product": "whatsapp",
-        "to": f"91{phone}",
-        "type": "template",
-        "template": {
-            "name": "kingdao_welcome_message",
-            "language": {"code": "en"},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "parameter_name": "user_name",
-                            "text": user_name
-                        },
-                        {
-                            "type": "text",
-                            "parameter_name": "dealer_code",
-                            "text": dealer_code
-                        }
-                    ]
+        "version": "2.0",
+        "country_code": "91",
+        "wid": template_id,
+        "type": "text",
+        "data":
+        [
+            {
+                "mobile": item["phone_number"], 
+                "bodyValues": {
+                    "1": item["dealer_name"],
+                    "2": item["dealer_code"]
                 }
-            ]
-        }
+            } for item in data
+        ]
     }
-    
+
     resp = requests.post(message_url, headers=message_headers, json=payload)
+    print(resp.text, resp.status_code)
 
-    if resp.status_code != 200:
-        st.error(f"WhatsApp API error for {phone}: {resp.text}")
-        return False
+    if resp.status_code == 200 and resp.json().get("status") == "Success":
+        return True
 
-    return True
-
+    return False
 
 def load_excel(file) -> pd.DataFrame | None:
     """Read Excel and normalize column names to lowercase."""
@@ -68,10 +54,10 @@ def load_excel(file) -> pd.DataFrame | None:
     return df
 
 
-def validate_data(df: pd.DataFrame) -> list[str] | None:
+def validate_data(df: pd.DataFrame) -> list[dict] | None:
     """
     Validate Excel data.
-    Returns a list of phone numbers or None on failure.
+    Returns a list of dicts or None on failure.
     """
     # Check required columns
     if not REQUIRED_COLUMNS.issubset(df.columns):
@@ -80,42 +66,27 @@ def validate_data(df: pd.DataFrame) -> list[str] | None:
 
     # Trim whitespace
     df["phone number"] = df["phone number"].astype(str).str.strip()
-    df["user name"] = df["dealer name"].astype(str).str.strip()
+    df["dealer name"] = df["dealer name"].astype(str).str.strip()
     df["dealer code"] = df["dealer code"].astype(str).str.strip()
 
     # Check for empty cells
-    empty_mask = df["phone number"].eq("") | df["user name"].eq("") | df["dealer code"].eq("")
+    empty_mask = df["phone number"].eq("") | df["dealer name"].eq("") | df["dealer code"].eq("")
     if empty_mask.any():
         st.warning(f"Rows with missing phone numbers: {list(df.index[empty_mask])}")
         st.info("Fill all phone numbers and re-upload.")
         return None
 
-    # Return unique phone numbers
-    phone_numbers = df["phone number"].tolist()
-    user_names = df["user name"].tolist()
-    dealer_codes = df["dealer code"].tolist()
-    return phone_numbers, user_names, dealer_codes
+    # Rename columns to match what send_whatsapp_msg expects
+    df = df.rename(columns={
+        "phone number": "phone_number",
+        "dealer name": "dealer_name", 
+        "dealer code": "dealer_code"
+    })
 
+    # Return list of records
+    return df.to_dict(orient="records")
 
-def process_and_send(phone_numbers: list[str], user_names: list[str], dealer_codes: list[str]) -> list[dict]:
-    """Send welcome messages for each phone number, return results list."""
-    results = []
-    
-    for phone, user_name, dealer_code in zip(phone_numbers, user_names, dealer_codes):
-        try:
-            ok = send_whatsapp_msg(phone, user_name, dealer_code)
-            status = "sent" if ok else "failed"
-        except Exception as e:
-            status = f"error: {e}"
-
-        results.append({"phone": phone, "status": status})
-    
-    return results
-
-
-# -----------------------------------------------------------------------------
-# UI
-# -----------------------------------------------------------------------------
+# ----------------------------------- UI ------------------------------------------
 def main():
     st.header("Welcome New User Message Sender")
     st.write(
@@ -137,16 +108,20 @@ def main():
         data = validate_data(df)
         if data is None:
             return
-        
-        phone_numbers, user_names, dealer_codes = data
 
-        st.info(f"Found {len(phone_numbers)} phone number(s) to process.")
+        if len(data) > 150:
+            st.info("Only 150 messages can be sent at a time. Add the remaining in the next batch")
+            return
+
+        st.info(f"Found {len(data)} phone number(s) to process.")
 
         with st.spinner("Sending welcome messages..."):
-            results = process_and_send(phone_numbers, user_names, dealer_codes)
+            result = send_whatsapp_msg(data)
 
-        st.success(f"Processed {len(results)} phone number(s).")
-        st.dataframe(pd.DataFrame(results))
+        if result:
+            st.success(f"Processed {len(data)} phone number(s).")
+        else:
+            st.error(f"Unable to send messages. Please check if the numbers entered are correct!")
 
 
 if __name__ == "__main__":

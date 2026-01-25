@@ -13,8 +13,6 @@ REQUIRED_COLUMNS = {"phone number", 'dealer name', 'dealer code'}
 
 
 def send_whatsapp_msg(data: list[dict]) -> bool:
-    """Send welcome WhatsApp message using the welcome_new_user template."""
-    
     message_url = f"https://console.authkey.io/restapi/requestjson_v2.0.php"
     message_headers = {
         "Content-Type": "application/json",
@@ -39,12 +37,12 @@ def send_whatsapp_msg(data: list[dict]) -> bool:
     }
 
     resp = requests.post(message_url, headers=message_headers, json=payload)
+    print(resp.text, resp.status_code)
 
-    if resp.status_code != 200:
-        return False
+    if resp.status_code == 200 and resp.json().get("status") == "Success":
+        return True
 
-    return True
-
+    return False
 
 def load_excel(file) -> pd.DataFrame | None:
     """Read Excel and normalize column names to lowercase."""
@@ -57,10 +55,10 @@ def load_excel(file) -> pd.DataFrame | None:
     return df
 
 
-def validate_data(df: pd.DataFrame) -> list[str] | None:
+def validate_data(df: pd.DataFrame) -> list[dict] | None:
     """
     Validate Excel data.
-    Returns a list of phone numbers or None on failure.
+    Returns a list of dicts or None on failure.
     """
     # Check required columns
     if not REQUIRED_COLUMNS.issubset(df.columns):
@@ -78,13 +76,19 @@ def validate_data(df: pd.DataFrame) -> list[str] | None:
         st.warning(f"Rows with missing phone numbers: {list(df.index[empty_mask])}")
         st.info("Fill all phone numbers and re-upload.")
         return None
+    
+    # Rename columns to match what send_whatsapp_msg expects
+    df = df.rename(columns={
+        "phone number": "phone_number",
+        "dealer name": "dealer_name", 
+        "dealer code": "dealer_code"
+    })
 
-    # Return unique phone numbers, dealer names and codes
-    return df.to_dict()
+    # Return list of records
+    return df.to_dict(orient="records")
 
-# -----------------------------------------------------------------------------
-# UI
-# -----------------------------------------------------------------------------
+
+# ------------------------------- UI ----------------------------------------------
 def main():
     st.header("Welcome New User Message Sender")
     st.markdown(
@@ -104,7 +108,12 @@ def main():
             return
 
         data = validate_data(df)
+        
         if data is None:
+            return
+
+        if len(data) > 150:
+            st.info("Only 150 messages can be sent at a time. Add the remaining in the next batch")
             return
 
         st.info(f"Found {len(data)} phone number(s) to process.")
