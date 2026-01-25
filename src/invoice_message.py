@@ -7,6 +7,18 @@ from dotenv import load_dotenv
 import os
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 import base64
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('invoice_message.log', mode='a')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -24,6 +36,7 @@ def extract_invoice_number(filename: str) -> str | None:
     """Return the part of the filename before the first underscore."""
     filename= filename.split(".")[0]
     if not filename:
+        logger.error(f"Failed to extract invoice number - empty filename after removing extension: {filename}")
         return None
     token = filename.split("_")[0]
     return token.strip() or None
@@ -72,11 +85,11 @@ def get_files_url(invoice_files: list[UploadedFile]) -> dict[str, str]:
             if resp.status_code in [200, 201]:
                 link = f"https://cdn.jsdelivr.net/gh/{REPO}@main/uploads/{inv_no}.pdf"
                 inv_to_link[inv_no] = link
+            else:
+                logger.error(f"GitHub upload failed for {file.name}: status={resp.status_code}, response={resp_json}")
 
-            # If upload fails for this file, continue with others (will be caught in process_and_send)
-
-        except Exception:
-            pass  # Silently skip, will be caught in process_and_send
+        except Exception as e:
+            logger.exception(f"Exception uploading file {file.name}: {e}")
     
     return inv_to_link
 
@@ -123,8 +136,10 @@ def send_whatsapp_batch(messages: list[dict]) -> bool:
         if resp.status_code == 200 and resp.json().get("status") == "Success":
             return True
         
+        logger.error(f"WhatsApp API failed: status={resp.status_code}, response={resp.text}, payload={payload}")
         return False
-    except Exception:
+    except Exception as e:
+        logger.exception(f"Exception sending WhatsApp batch: {e}, payload={payload}")
         return False
 
 
@@ -139,6 +154,7 @@ def process_and_send(mapping: dict, inv_to_link: dict) -> list[dict]:
     for invoice_no, info in mapping.items():
         pdf_link = inv_to_link.get(invoice_no)
         if not pdf_link:
+            logger.error(f"No PDF link for invoice {invoice_no}, mapping: {inv_to_link}")
             results.append({
                 "Invoice Number": invoice_no,
                 "Dealer Name": info["dealer"],
@@ -214,6 +230,7 @@ def load_excel(file) -> pd.DataFrame | None:
     try:
         df = pd.read_excel(file)
     except Exception as e:
+        logger.exception(f"Failed to read Excel file {file.name}: {e}")
         st.error(f"Failed to read Excel: {e}")
         return None
     df.columns = df.columns.str.strip().str.lower()
@@ -226,12 +243,14 @@ def validate_data(df: pd.DataFrame, invoice_numbers: list[str]) -> dict[str, dic
     Returns a mapping {invoice_number: {phone, dealer, amount, no_of_cases, sales_number}} or None on failure.
     """
     if df.empty:
+        logger.error("Validation failed: Excel file is empty")
         st.error("Excel file is empty.")
         return None
 
     # Check required columns
     if not REQUIRED_COLUMNS.issubset(df.columns):
         missing_cols = REQUIRED_COLUMNS - set(df.columns)
+        logger.error(f"Validation failed: Missing columns {missing_cols}, found: {list(df.columns)}")
         st.error(f"Excel is missing columns: {', '.join(missing_cols)}")
         return None
 

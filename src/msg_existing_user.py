@@ -3,6 +3,18 @@ import streamlit as st
 import requests
 from dotenv import load_dotenv
 import os
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('msg_existing_user.log', mode='a')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -37,11 +49,11 @@ def send_whatsapp_msg(data: list[dict]) -> bool:
     }
 
     resp = requests.post(message_url, headers=message_headers, json=payload)
-    print(resp.text, resp.status_code)
 
     if resp.status_code == 200 and resp.json().get("status") == "Success":
         return True
 
+    logger.error(f"WhatsApp API failed: status={resp.status_code}, response={resp.text}, payload={payload}")
     return False
 
 def load_excel(file) -> pd.DataFrame | None:
@@ -49,6 +61,7 @@ def load_excel(file) -> pd.DataFrame | None:
     try:
         df = pd.read_excel(file)
     except Exception as e:
+        logger.exception(f"Failed to read Excel file {file.name}: {e}")
         st.error(f"Failed to read Excel: {e}")
         return None
     df.columns = df.columns.str.strip().str.lower()
@@ -62,6 +75,7 @@ def validate_data(df: pd.DataFrame) -> list[dict] | None:
     """
     # Check required columns
     if not REQUIRED_COLUMNS.issubset(df.columns):
+        logger.error(f"Validation failed: Missing columns. Found: {list(df.columns)}, Required: {REQUIRED_COLUMNS}")
         st.error(f"Excel must have column: phone number, dealer name, dealer code")
         return None
 
@@ -73,7 +87,9 @@ def validate_data(df: pd.DataFrame) -> list[dict] | None:
     # Check for empty cells
     empty_mask = df["phone number"].eq("") | df["dealer name"].eq("") | df["dealer code"].eq("")
     if empty_mask.any():
-        st.warning(f"Rows with missing phone numbers: {list(df.index[empty_mask])}")
+        empty_rows = list(df.index[empty_mask])
+        logger.error(f"Validation failed: Rows with missing values: {empty_rows}")
+        st.warning(f"Rows with missing phone numbers: {empty_rows}")
         st.info("Fill all phone numbers and re-upload.")
         return None
     
