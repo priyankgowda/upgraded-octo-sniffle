@@ -10,14 +10,6 @@ import base64
 import logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('invoice_message.log', mode='a')
-    ]
-)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -93,6 +85,9 @@ def get_files_url(invoice_files: list[UploadedFile]) -> dict[str, str]:
     
     return inv_to_link
 
+def format_currency(number):
+    number = int(number)
+    return f"{number:,.2f}"
 
 def send_whatsapp_batch(messages: list[dict]) -> bool:
     """
@@ -112,13 +107,13 @@ def send_whatsapp_batch(messages: list[dict]) -> bool:
         data.append({
             "headerValues": {
                 "headerData": msg["pdf_link"],
-                "headerFileName": f"{msg['invoice_no']}.pdf",
+                "headerFileName": f"{msg['invoice_no']}/2025-26.pdf",
             },
             "mobile": msg["mobile"],
             "bodyValues": {
                 "1": msg["dealer_name"],
                 "2": str(msg["no_of_cases"]),
-                "3": str(msg["amount"])
+                "3": format_currency(msg["amount"])
             }
         })
 

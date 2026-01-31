@@ -6,14 +6,6 @@ import os
 import logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('msg_existing_user.log', mode='a')
-    ]
-)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -47,8 +39,10 @@ def send_whatsapp_msg(data: list[dict]) -> bool:
             } for item in data
         ]
     }
+    print(payload)
 
     resp = requests.post(message_url, headers=message_headers, json=payload)
+    print(resp.text)
 
     if resp.status_code == 200 and resp.json().get("status") == "Success":
         return True

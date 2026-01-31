@@ -6,14 +6,6 @@ import os
 import logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('welcome_new_user.log', mode='a')
-    ]
-)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
