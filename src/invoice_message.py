@@ -34,6 +34,24 @@ def extract_invoice_number(filename: str) -> str | None:
     return token.strip() or None
 
 
+def format_inr(number):
+    number = float(number)
+    whole, decimal = f"{number:.2f}".split(".")
+    
+    # Last 3 digits stay together
+    last_three = whole[-3:]
+    remaining = whole[:-3]
+
+    if remaining:
+        # Add commas after every 2 digits in the remaining part
+        remaining = ",".join([remaining[max(i-2, 0):i] for i in range(len(remaining), 0, -2)][::-1])
+        formatted = remaining + "," + last_three
+    else:
+        formatted = last_three
+
+    return formatted + "." + decimal
+
+
 def get_files_url(invoice_files: list[UploadedFile]) -> dict[str, str]:
     inv_to_link = {}
     
@@ -85,9 +103,6 @@ def get_files_url(invoice_files: list[UploadedFile]) -> dict[str, str]:
     
     return inv_to_link
 
-def format_currency(number):
-    number = int(number)
-    return f"{number:,.2f}"
 
 def send_whatsapp_batch(messages: list[dict]) -> bool:
     """
@@ -113,7 +128,7 @@ def send_whatsapp_batch(messages: list[dict]) -> bool:
             "bodyValues": {
                 "1": msg["dealer_name"],
                 "2": str(msg["no_of_cases"]),
-                "3": format_currency(msg["amount"])
+                "3": format_inr(msg["amount"])
             }
         })
 
