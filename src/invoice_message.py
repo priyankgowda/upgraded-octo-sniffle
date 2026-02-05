@@ -19,7 +19,7 @@ template_wid = os.getenv("INVOICE_MSG_WID")
 REPO = os.getenv("REPO")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
-REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount", "no of cases", "sales number"}
+REQUIRED_COLUMNS = {"invoice number", "phone number", "dealer name", "amount", "no of cases"}
 AUTHKEY_API_URL = "https://console.authkey.io/restapi/requestjson_v2.0.php"
 BATCH_SIZE = 200
 
@@ -185,15 +185,16 @@ def process_and_send(mapping: dict, inv_to_link: dict) -> list[dict]:
             "invoice_no": invoice_no
         })
 
-        # Add message for sales number
-        messages.append({
-            "mobile": info["sales_number"],
-            "pdf_link": pdf_link,
-            "dealer_name": info["dealer"],
-            "no_of_cases": info["no_of_cases"],
-            "amount": info["amount"],
-            "invoice_no": invoice_no
-        })
+        # Add message for sales number only if provided
+        if info["sales_number"]:
+            messages.append({
+                "mobile": info["sales_number"],
+                "pdf_link": pdf_link,
+                "dealer_name": info["dealer"],
+                "no_of_cases": info["no_of_cases"],
+                "amount": info["amount"],
+                "invoice_no": invoice_no
+            })
 
         results.append({
             "Invoice Number": invoice_no,
@@ -268,7 +269,7 @@ def validate_data(df: pd.DataFrame, invoice_numbers: list[str]) -> dict[str, dic
     for col in REQUIRED_COLUMNS:
         df[col] = df[col].astype(str).str.strip()
 
-    # Check for empty cells (also catch 'nan' from NaN values)
+    # Check for empty cells in required columns (also catch 'nan' from NaN values)
     empty_mask = df[list(REQUIRED_COLUMNS)].apply(
         lambda col: col.eq("") | col.str.lower().eq("nan")
     ).any(axis=1)
@@ -277,6 +278,14 @@ def validate_data(df: pd.DataFrame, invoice_numbers: list[str]) -> dict[str, dic
         st.warning(f"Rows with missing values (Excel row numbers): {bad_rows}")
         st.info("Fill all required fields and re-upload.")
         return None
+
+    # Handle optional sales number column
+    if "sales number" in df.columns:
+        df["sales number"] = df["sales number"].astype(str).str.strip()
+        # Treat 'nan' as empty
+        df["sales number"] = df["sales number"].apply(lambda x: "" if x.lower() == "nan" else x)
+    else:
+        df["sales number"] = ""
 
     # Check for duplicate invoice numbers in Excel
     duplicates = df[df["invoice number"].duplicated(keep=False)]["invoice number"].unique()
@@ -315,7 +324,7 @@ def validate_data(df: pd.DataFrame, invoice_numbers: list[str]) -> dict[str, dic
 def main():
     st.header("Invoice Message Sender")
     st.write(
-        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`, `no of cases`, `sales number`.\n\n"
+        "Upload an **Excel file** with columns: `dealer name`, `invoice number`, `phone number`, `amount`, `no of cases`, and optionally `sales number`.\n\n"
         "Upload **invoice files** (multi-select). Filename format: `<invoice_number>_<anything>.<ext>`"
     )
 
