@@ -122,7 +122,7 @@ def send_whatsapp_batch(messages: list[dict]) -> bool:
         data.append({
             "headerValues": {
                 "headerData": msg["pdf_link"],
-                "headerFileName": f"{msg['invoice_no']}/2025-26.pdf",
+                "headerFileName": f"{msg['invoice_no']}/2026-27.pdf",
             },
             "mobile": msg["mobile"],
             "bodyValues": {
