@@ -18,6 +18,11 @@ page = st.navigation(
                 icon=":material/receipt_long:",
             ),
             st.Page(
+                page= dir_path / "src" / "salary_slip_msg.py",
+                title="Send Salary Slip",
+                icon=":material/badge:",
+            ),
+            st.Page(
                 page= dir_path / "src" / "welcome_new_user.py",
                 title="New User",
                 icon=":material/person_add:",
